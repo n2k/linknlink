@@ -4,7 +4,13 @@ Research into the LinknLink iSG (Android tablet/wall-mounted smart screen) syste
 
 ## Contents of This Repo
 
-- `README.md` — Findings and analysis
+```
+README.md                       — Findings and analysis
+scripts/
+  cleanup-adb.sh                — Android-side cleanup via ADB (run from host)
+  cleanup-termux.sh             — Termux-side cleanup (run via SSH on device)
+  setup-kiosk.sh                — Kiosk browser setup via ADB (run from host)
+```
 
 ## Source Files (not committed)
 
@@ -12,6 +18,39 @@ Research into the LinknLink iSG (Android tablet/wall-mounted smart screen) syste
 |------|------|-------------|
 | `image_20251212_143315_*.tar.gz` | ~2.5 GB | iSG system image (Termux userland snapshot) |
 | `20167_global_1224.apk` | ~243 MB | iSG homescreen/launcher app |
+
+---
+
+## Homescreen APK Analysis
+
+| Property | Value |
+|----------|-------|
+| Package | `com.linknlink.app.device.isg` |
+| Version | `20.167.251224_global` (code: 20167) |
+| Target SDK | Android 11 (API 30) |
+| Min SDK | Android 8.0 (API 26) |
+| Architecture | arm64-v8a, armeabi-v7a |
+| Base SDK | Broadlink (`cn.com.broadlink.unify.app`) |
+| Launcher Activity | `cn.com.broadlink.unify.app.activity.common.LoadingActivity` |
+
+### Hardware Features Used
+
+- `android.hardware.type.television` — Confirms wall-mounted screen form factor
+- `android.hardware.screen.landscape` — Landscape-only display
+- `android.hardware.bluetooth_le` — BLE for device pairing
+- `android.hardware.usb.host` — USB host for Zigbee/Z-Wave dongles
+- `android.hardware.camera` — Camera support
+- `android.software.leanback` — Android TV interface
+- IR transmitter (`TRANSMIT_IR` permission)
+- NFC support
+
+### Key Permissions
+
+- `com.termux.permission.RUN_COMMAND` — Direct control of Termux from the app
+- `android.permission.FORCE_STOP_PACKAGES` — Can kill other apps
+- `android.permission.RECEIVE_BOOT_COMPLETED` — Auto-starts on boot
+- `android.permission.SYSTEM_ALERT_WINDOW` — Overlay permissions
+- `android.permission.DISABLE_KEYGUARD` — Can dismiss lock screen
 
 ---
 
@@ -195,13 +234,60 @@ Services are controlled via runit (`runsv`/`runsvdir`). The `isgservicemonitor` 
 
 The current image is massively over-provisioned for a kiosk browser use case. ~95%+ of the content is unnecessary.
 
-### Option A: Stay on Android (Recommended — Simplest)
+### Option A: Stay on Android + Clean Up (Recommended — Simplest)
 
-- Skip this entire Termux image
-- Replace the homescreen APK with a kiosk browser (e.g., Fully Kiosk Browser, or a custom Android WebView app)
-- Use ADB to lock down the device (hide nav bar, set as device owner, auto-start on boot)
-- **Pro**: No bootloader/kernel risks, touchscreen/display guaranteed to work
-- **Con**: Still running Android overhead
+Keep Android but strip it down for kiosk use. This is a two-phase process:
+
+**Phase 1: Android cleanup (from host via ADB)**
+```bash
+# Connect and clean up Android bloatware, optimize display settings
+bash scripts/cleanup-adb.sh 192.168.1.100
+
+# This will also save device_props.txt and installed_packages.txt
+# for hardware identification
+```
+
+**Phase 2: Termux cleanup (SSH into device)**
+```bash
+# SSH into the iSG
+ssh root@192.168.1.100 -p 8022
+
+# Basic cleanup: stop services, clear caches, remove dev tools
+bash cleanup-termux.sh
+
+# Full cleanup: also remove proot Ubuntu, node_modules, Python packages
+# Saves ~2+ GB and frees significant RAM
+bash cleanup-termux.sh --aggressive
+```
+
+**Phase 3: Set up kiosk browser**
+```bash
+bash scripts/setup-kiosk.sh 192.168.1.100 https://your-dashboard.com
+# Optionally provide a kiosk browser APK:
+bash scripts/setup-kiosk.sh 192.168.1.100 https://your-dashboard.com --browser fully-kiosk.apk
+```
+
+**What gets removed/disabled:**
+
+| Category | Items | Estimated Savings |
+|----------|-------|-------------------|
+| Termux services | 16 of 19 runit services stopped | ~200 MB RAM |
+| proot Ubuntu | Full rootfs + Home Assistant | ~1.5 GB disk |
+| Node.js modules | zigbee2mqtt, node-red, zwave, matter | ~500 MB disk |
+| Python packages | 548 HA-related packages | ~300 MB disk |
+| Dev toolchain | Clang 20, CMake, GCC, autotools | ~400 MB disk |
+| MariaDB | Database server + data | ~100 MB disk |
+| Caches | pip, npm, temp files, logs | ~100 MB disk |
+| Android bloatware | Google apps, OEM apps (disabled) | ~50 MB RAM |
+
+**What stays:**
+- Android OS + display/touch drivers
+- Termux (minimal, for SSH access)
+- SSHD (remote management)
+- Kiosk browser app
+
+- **Pro**: No bootloader/kernel risks, touchscreen/display guaranteed to work, reversible
+- **Con**: Still running Android overhead (~200 MB baseline)
 
 ### Option B: Linux via Termux + proot (No Root Needed)
 
@@ -224,8 +310,10 @@ The current image is massively over-provisioned for a kiosk browser use case. ~9
 ## TODO
 
 - [ ] Get ADB/SSH access to a live iSG device
+- [ ] Run `cleanup-adb.sh` to gather device info (`device_props.txt`)
 - [ ] Identify the SoC/chipset (`getprop ro.board.platform`, `/proc/cpuinfo`)
 - [ ] Determine display resolution and touch controller
-- [ ] Test Option A with Fully Kiosk Browser or custom WebView APK
-- [ ] Investigate bootloader unlock possibility for Option C
-- [ ] Analyze the homescreen APK (`20167_global_1224.apk`)
+- [ ] Run `cleanup-termux.sh --aggressive` to free resources
+- [ ] Test kiosk browser (Fully Kiosk Browser or custom WebView APK)
+- [ ] Evaluate if remaining performance is acceptable
+- [ ] Investigate bootloader unlock possibility for Option C (if needed)
