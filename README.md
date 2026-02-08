@@ -21,6 +21,27 @@ scripts/
 
 ---
 
+## Live Device Hardware
+
+| Property | Value |
+|----------|-------|
+| Model | CPF1056 |
+| SoC | **Allwinner Ceres** (sun50iw10p1) |
+| CPU | 4x ARM Cortex-A53 (ARMv8, 48 BogoMIPS each) |
+| RAM | 3,923 MB (~4 GB) |
+| Storage | 20 GB eMMC (mmcblk0), 23 GB /data partition |
+| Display | 1280x800, 160 DPI (landscape) |
+| Android | 10 (API 29) |
+| ADB | Wireless on port 5555 (persisted via `persist.adb.tcp.port`) |
+
+### Allwinner Ceres Notes
+
+The Allwinner "Ceres" (sun50iw10p1) is a relatively obscure Allwinner SoC. Allwinner chips generally have decent mainline Linux support through the sunxi community, though this specific variant may require more research. Key resources:
+- [linux-sunxi wiki](https://linux-sunxi.org/)
+- Kernel support status varies by exact chip variant
+
+---
+
 ## Homescreen APK Analysis
 
 | Property | Value |
@@ -307,13 +328,66 @@ bash scripts/setup-kiosk.sh 192.168.1.100 https://your-dashboard.com --browser f
 
 ---
 
+## Cleanup Results (2026-02-08)
+
+### Before Cleanup
+
+| Metric | Value |
+|--------|-------|
+| Memory used | 1,393 MB / 3,923 MB (35.5%) |
+| CPU | 13.1% |
+| Disk | 7,006 MB / 20,092 MB (34.9%) |
+| Processes | 39 |
+| Top consumer | hass: 334 MB, mysqld: 125 MB |
+
+### After Cleanup
+
+| Metric | Value |
+|--------|-------|
+| Memory used | **923 MB / 3,923 MB (23.5%)** |
+| CPU | **12.0%** |
+| Disk | 6,852 MB / 20,092 MB (34.1%) |
+| Processes | **30** |
+| Top consumer | com.termux: 139 MB |
+
+### What Was Done
+
+**Android side (via ADB):**
+- Disabled 42 bloatware packages (Google apps, Allwinner test apps, Opera, APKPure, OTA updaters)
+- Removed wireless ADB app (no longer needed — ADB persisted natively)
+- Disabled all animations
+- Set screen always-on, disabled lockscreen
+- Limited background processes to 2
+- Cleared app caches
+
+**Termux side (via ADB run-as):**
+- Stopped 7 services: hass, mysqld, isgdatamanager, isgdida, isgelecstat, isgspacemanager, isgtrigger
+- Killed proot (Ubuntu container for HA)
+- Enabled SSHD
+
+**Memory freed: ~470 MB (34% reduction)**
+
+### Still Running
+
+| Service | Memory | Purpose | Can Remove? |
+|---------|--------|---------|-------------|
+| com.termux | 139 MB | Termux base | No (needed for services) |
+| isgaddonmanager | 25 MB | Addon manager | Maybe (manages service updates) |
+| mosquitto | 7 MB | MQTT broker | Yes if not using MQTT |
+| sshd | 4 MB | SSH remote access | No (needed for management) |
+| runsv/svlogd (x23) | ~64 MB | Service supervisors | Partially (could remove stopped service dirs) |
+
+---
+
 ## TODO
 
-- [ ] Get ADB/SSH access to a live iSG device
-- [ ] Run `cleanup-adb.sh` to gather device info (`device_props.txt`)
-- [ ] Identify the SoC/chipset (`getprop ro.board.platform`, `/proc/cpuinfo`)
-- [ ] Determine display resolution and touch controller
-- [ ] Run `cleanup-termux.sh --aggressive` to free resources
-- [ ] Test kiosk browser (Fully Kiosk Browser or custom WebView APK)
-- [ ] Evaluate if remaining performance is acceptable
-- [ ] Investigate bootloader unlock possibility for Option C (if needed)
+- [x] ~~Get ADB/SSH access to a live iSG device~~
+- [x] ~~Identify the SoC/chipset~~ → Allwinner Ceres (sun50iw10p1)
+- [x] ~~Determine display resolution~~ → 1280x800 @ 160 DPI
+- [x] ~~Run initial cleanup~~ → 470 MB RAM freed
+- [ ] Test kiosk browser (Fully Kiosk Browser is already installed: `de.ozerov.fully`)
+- [ ] Run aggressive Termux cleanup (remove proot Ubuntu, node_modules, dev tools — saves ~2 GB disk)
+- [ ] Evaluate if `isgaddonmanager` can be stopped safely
+- [ ] Remove runsv/svlogd instances for permanently disabled services
+- [ ] Research Allwinner Ceres mainline Linux support for Option C
+- [ ] Investigate bootloader unlock possibility
