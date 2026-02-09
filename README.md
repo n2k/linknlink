@@ -7,6 +7,11 @@ Converting a LinknLink iSG (Android wall-mounted smart screen) from a bloated sm
 ```
 README.md                           — This file (findings + setup guide)
 
+twrp-device-tree/                   — TWRP recovery device tree (auto-generated + customized)
+  BoardConfig.mk                    — Board config (kernel, partitions, TWRP options)
+  recovery.fstab                    — Partition layout for TWRP
+  prebuilt/                         — Kernel + DTB extracted from stock recovery
+
 kiosk-browser/                      — Custom Android WebView kiosk browser app
   app/src/main/
     AndroidManifest.xml             — Home launcher + boot receiver
@@ -331,7 +336,7 @@ fastboot reboot
 | A/B partitions | No (dedicated recovery) |
 | Dynamic partitions | Yes (super) |
 
-**TWRP status**: No official TWRP build exists for this device. A custom build would need the vendor kernel (4.9.170) and a device tree. The backed-up `boot.img` kernel can be reused.
+**TWRP device tree**: Auto-generated from the stock recovery image using `twrpdtgen`, then customized for our landscape screen and FBE encryption. See `twrp-device-tree/` for build instructions.
 
 ### WebView Provider System
 - Framework resource `res/xml/config_webview_packages.xml` controls allowed providers
@@ -398,7 +403,7 @@ The system image is a **Termux userland filesystem snapshot** (not a full Androi
 - [x] Custom boot animation (heat pump themed)
 - [x] Automated setup script
 - [ ] Unlock bootloader (OEM unlock enabled, needs physical USB to test)
-- [ ] Build and flash TWRP recovery (no official build — needs custom device tree)
+- [ ] Build TWRP recovery from device tree (see `twrp-device-tree/`)
 - [ ] Add hard-reload command to kiosk app (clear WebView cache + reload)
 - [ ] Remove AuroraStore from device (no longer needed)
 - [ ] Aggressive Termux disk cleanup (remove proot Ubuntu, ~1.5 GB)
