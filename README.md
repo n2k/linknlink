@@ -336,7 +336,7 @@ fastboot reboot
 | A/B partitions | No (dedicated recovery) |
 | Dynamic partitions | Yes (super) |
 
-**TWRP device tree**: Auto-generated from the stock recovery image using `twrpdtgen`, then customized for our landscape screen and FBE encryption. See `twrp-device-tree/` for build instructions.
+**TWRP recovery**: Successfully built and flashed! Custom TWRP from auto-generated device tree. Fits exactly in 32 MB recovery partition. Flashed via `dd` with root ADB (no bootloader unlock needed). See `twrp-device-tree/` for build/flash instructions.
 
 ### WebView Provider System
 - Framework resource `res/xml/config_webview_packages.xml` controls allowed providers
@@ -402,8 +402,9 @@ The system image is a **Termux userland filesystem snapshot** (not a full Androi
 - [x] Upgrade WebView (Chromium 74 → 146 via framework overlay)
 - [x] Custom boot animation (heat pump themed)
 - [x] Automated setup script
+- [x] Build and flash TWRP recovery (successfully built and flashed via dd)
 - [ ] Unlock bootloader (OEM unlock enabled, needs physical USB to test)
-- [ ] Build TWRP recovery from device tree (see `twrp-device-tree/`)
+- [ ] Test TWRP functionality (needs USB cable for ADB in recovery)
 - [ ] Add hard-reload command to kiosk app (clear WebView cache + reload)
 - [ ] Remove AuroraStore from device (no longer needed)
 - [ ] Aggressive Termux disk cleanup (remove proot Ubuntu, ~1.5 GB)

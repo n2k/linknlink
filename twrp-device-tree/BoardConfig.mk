@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-DEVICE_PATH := device/allwinner/ceres-c3
+DEVICE_PATH := device/allwinner/ceres_c3
 
 # For building with minimal manifest
 ALLOW_MISSING_DEPENDENCIES := true
@@ -37,19 +37,21 @@ TARGET_SCREEN_DENSITY := 160
 
 # Kernel
 BOARD_BOOTIMG_HEADER_VERSION := 2
-BOARD_KERNEL_BASE := 0x40078000
+BOARD_KERNEL_BASE := 0x00000000
 BOARD_KERNEL_CMDLINE := firmware_class.path=/vendor/etc/firmware selinux=1 androidboot.selinux=enforcing androidboot.dtbo_idx=0,1,2 buildvariant=userdebug
 BOARD_KERNEL_PAGESIZE := 2048
-BOARD_RAMDISK_OFFSET := 0x02f88000
-BOARD_KERNEL_TAGS_OFFSET := 0xfff88100
+BOARD_KERNEL_OFFSET := 0x40080000
+BOARD_RAMDISK_OFFSET := 0x43000000
+BOARD_KERNEL_TAGS_OFFSET := 0x40000100
 BOARD_MKBOOTIMG_ARGS += --header_version $(BOARD_BOOTIMG_HEADER_VERSION)
+BOARD_MKBOOTIMG_ARGS += --kernel_offset $(BOARD_KERNEL_OFFSET)
 BOARD_MKBOOTIMG_ARGS += --ramdisk_offset $(BOARD_RAMDISK_OFFSET)
 BOARD_MKBOOTIMG_ARGS += --tags_offset $(BOARD_KERNEL_TAGS_OFFSET)
 BOARD_KERNEL_IMAGE_NAME := Image
 BOARD_INCLUDE_DTB_IN_BOOTIMG := true
 BOARD_KERNEL_SEPARATED_DTBO := true
-TARGET_KERNEL_CONFIG := ceres-c3_defconfig
-TARGET_KERNEL_SOURCE := kernel/allwinner/ceres-c3
+TARGET_KERNEL_CONFIG := ceres_c3_defconfig
+TARGET_KERNEL_SOURCE := kernel/allwinner/ceres_c3
 
 # Kernel - prebuilt
 TARGET_FORCE_PREBUILT_KERNEL := true
@@ -99,20 +101,27 @@ PLATFORM_VERSION := 16.1.0
 
 # TWRP Configuration
 TW_THEME := landscape_hdpi
-TW_EXTRA_LANGUAGES := true
+TW_EXTRA_LANGUAGES := false
 TW_SCREEN_BLANK_ON_BOOT := true
 TW_INPUT_BLACKLIST := "hbtp_vm"
 TW_USE_TOOLBOX := true
 TW_NO_BATT_PERCENT := true
 TW_NO_SCREEN_TIMEOUT := true
 TW_EXCLUDE_TWRPAPP := true
-TW_INCLUDE_REPACKTOOLS := true
+TW_INCLUDE_REPACKTOOLS := false
+TW_EXCLUDE_SUPERSU := true
+TW_EXCLUDE_MTP := true
+TW_EXCLUDE_NANO := true
+TW_EXCLUDE_BASH := true
+TW_EXCLUDE_TZDATA := true
+TW_EXCLUDE_LPDUMP := true
+TW_EXCLUDE_LPTOOLS := true
 
-# Encryption (device uses FBE)
-TW_INCLUDE_CRYPTO := true
-TW_INCLUDE_CRYPTO_FBE := true
-TW_INCLUDE_FBE_METADATA_DECRYPT := true
+# Disable encryption support to save space
+# Data partition is FBE-encrypted — TWRP won't decrypt it, but can still
+# flash/wipe partitions and flash ZIPs, which is what we need.
+TW_INCLUDE_CRYPTO := false
 
-# Logs
-TWRP_INCLUDE_LOGCAT := true
-TARGET_USES_LOGD := true
+# Disable logcat to save space (534 KB needed)
+TWRP_INCLUDE_LOGCAT := false
+TARGET_USES_LOGD := false

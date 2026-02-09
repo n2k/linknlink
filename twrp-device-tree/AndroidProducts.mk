@@ -6,9 +6,9 @@
 #
 
 PRODUCT_MAKEFILES := \
-    $(LOCAL_DIR)/omni_ceres-c3.mk
+    $(LOCAL_DIR)/twrp_ceres_c3.mk
 
 COMMON_LUNCH_CHOICES := \
-    omni_ceres-c3-user \
-    omni_ceres-c3-userdebug \
-    omni_ceres-c3-eng
+    twrp_ceres_c3-user \
+    twrp_ceres_c3-userdebug \
+    twrp_ceres_c3-eng
