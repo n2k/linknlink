@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Framework overlay to add additional WebView providers.
+     The stock firmware only allows com.android.webview (Chromium 74).
+     This overlay adds com.google.android.webview.dev, com.google.android.webview,
+     and com.android.chrome as valid providers, enabling WebView updates. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.linknlink.webview.overlay">
+    <overlay
+        android:targetPackage="android"
+        android:isStatic="true"
+        android:priority="999" />
+</manifest>

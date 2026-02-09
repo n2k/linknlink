@@ -1,0 +1,35 @@
+# Build outputs
+kiosk-browser/app/build/
+kiosk-browser/build/
+kiosk-browser/.gradle/
+kiosk-browser/local.properties
+
+# Gradle
+.gradle/
+*.hprof
+
+# APK files (build outputs)
+*.apk
+
+# WebView overlay build artifacts
+webview-overlay/compiled.zip
+webview-overlay/*.unsigned.apk
+webview-overlay/WebViewConfigOverlay.apk
+webview-overlay/debug.keystore
+webview-overlay/framework-res.apk
+
+# Boot animation build artifacts
+boot-animation/bootanimation.zip
+boot-animation/bootanim_build/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large source files (not committed)
+*.tar.gz

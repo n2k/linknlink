@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Override framework WebView provider list.
+     Stock firmware only has com.android.webview (Chromium 74, from 2019).
+     This adds modern WebView providers so the system can use an updated engine. -->
+<webviewproviders>
+    <webviewprovider
+        description="Android WebView Dev"
+        packageName="com.google.android.webview.dev"
+        availableByDefault="true" />
+    <webviewprovider
+        description="Android WebView"
+        packageName="com.android.webview"
+        availableByDefault="true" />
+    <webviewprovider
+        description="Google Chrome"
+        packageName="com.android.chrome"
+        availableByDefault="false" />
+    <webviewprovider
+        description="Google WebView"
+        packageName="com.google.android.webview"
+        availableByDefault="false" />
+</webviewproviders>

@@ -1,393 +1,345 @@
-# LinknLink iSG Research
+# LinknLink iSG — Kiosk Conversion
 
-Research into the LinknLink iSG (Android tablet/wall-mounted smart screen) system image, with the goal of creating a minimal kiosk browser setup.
+Converting a LinknLink iSG (Android wall-mounted smart screen) from a bloated smart-home hub into a lean, fast kiosk browser.
 
-## Contents of This Repo
+## What This Repo Contains
 
 ```
-README.md                       — Findings and analysis
+README.md                           — This file (findings + setup guide)
+NATIVE_LINUX.md                     — Research into native Linux on the hardware
+
+kiosk-browser/                      — Custom Android WebView kiosk browser app
+  app/src/main/
+    AndroidManifest.xml             — Home launcher + boot receiver
+    java/.../KioskActivity.java     — Fullscreen WebView with error handling
+    java/.../SettingsActivity.java  — URL config (5x tap top-right corner)
+    java/.../BootReceiver.java      — Auto-launch on boot
+
+webview-overlay/                    — Framework overlay to enable modern WebView
+  AndroidManifest.xml               — Targets android framework
+  res/xml/config_webview_packages.xml — Adds modern WebView providers
+  build.sh                          — Build the overlay APK
+
+boot-animation/                     — Custom boot animation generator
+  generate.py                       — Python script (Pillow) to generate frames
+
 scripts/
-  cleanup-adb.sh                — Android-side cleanup via ADB (run from host)
-  cleanup-termux.sh             — Termux-side cleanup (run via SSH on device)
-  setup-kiosk.sh                — Kiosk browser setup via ADB (run from host)
+  setup-kiosk-device.sh             — Full automated setup (run from host)
+  cleanup-adb.sh                    — Android cleanup via ADB
+  cleanup-termux.sh                 — Termux cleanup (run on device)
+  setup-kiosk.sh                    — Older kiosk setup script
 ```
 
-## Source Files (not committed)
+## Quick Start
 
-| File | Size | Description |
-|------|------|-------------|
-| `image_20251212_143315_*.tar.gz` | ~2.5 GB | iSG system image (Termux userland snapshot) |
-| `20167_global_1224.apk` | ~243 MB | iSG homescreen/launcher app |
+After a **factory reset**, run:
+
+```bash
+# 1. Build the kiosk browser APK
+cd kiosk-browser && gradle assembleDebug
+
+# 2. Build the WebView overlay
+cd webview-overlay
+adb pull /system/framework/framework-res.apk .
+./build.sh
+
+# 3. Generate the boot animation
+cd boot-animation && python3 generate.py
+
+# 4. Run the full setup
+cd scripts && bash setup-kiosk-device.sh 192.168.86.112 http://192.168.86.10/kiosk.html
+
+# 5. Reboot, then install WebView Dev via AuroraStore
+adb -s 192.168.86.112:5555 reboot
+```
 
 ---
 
-## Live Device Hardware
+## Device Hardware
 
 | Property | Value |
 |----------|-------|
 | Model | CPF1056 |
-| SoC | **Allwinner Ceres** (sun50iw10p1) |
-| CPU | 4x ARM Cortex-A53 (ARMv8, 48 BogoMIPS each) |
+| SoC | **Allwinner A133** (sun50iw10p1, aka "Ceres") |
+| CPU | 4x ARM Cortex-A53 @ 1.6 GHz (ARMv8-A, aarch64) |
+| GPU | Imagination PowerVR GE8300 |
 | RAM | 3,923 MB (~4 GB) |
-| Storage | 20 GB eMMC (mmcblk0), 23 GB /data partition |
-| Display | 1280x800, 160 DPI (landscape) |
-| Android | 10 (API 29) |
-| ADB | Wireless on port 5555 (persisted via `persist.adb.tcp.port`) |
-
-### Allwinner Ceres Notes
-
-The Allwinner "Ceres" (sun50iw10p1) is a relatively obscure Allwinner SoC. Allwinner chips generally have decent mainline Linux support through the sunxi community, though this specific variant may require more research. Key resources:
-- [linux-sunxi wiki](https://linux-sunxi.org/)
-- Kernel support status varies by exact chip variant
-
----
-
-## Homescreen APK Analysis
-
-| Property | Value |
-|----------|-------|
-| Package | `com.linknlink.app.device.isg` |
-| Version | `20.167.251224_global` (code: 20167) |
-| Target SDK | Android 11 (API 30) |
-| Min SDK | Android 8.0 (API 26) |
-| Architecture | arm64-v8a, armeabi-v7a |
-| Base SDK | Broadlink (`cn.com.broadlink.unify.app`) |
-| Launcher Activity | `cn.com.broadlink.unify.app.activity.common.LoadingActivity` |
-
-### Hardware Features Used
-
-- `android.hardware.type.television` — Confirms wall-mounted screen form factor
-- `android.hardware.screen.landscape` — Landscape-only display
-- `android.hardware.bluetooth_le` — BLE for device pairing
-- `android.hardware.usb.host` — USB host for Zigbee/Z-Wave dongles
-- `android.hardware.camera` — Camera support
-- `android.software.leanback` — Android TV interface
-- IR transmitter (`TRANSMIT_IR` permission)
-- NFC support
-
-### Key Permissions
-
-- `com.termux.permission.RUN_COMMAND` — Direct control of Termux from the app
-- `android.permission.FORCE_STOP_PACKAGES` — Can kill other apps
-- `android.permission.RECEIVE_BOOT_COMPLETED` — Auto-starts on boot
-- `android.permission.SYSTEM_ALERT_WINDOW` — Overlay permissions
-- `android.permission.DISABLE_KEYGUARD` — Can dismiss lock screen
+| Storage | 30 GB eMMC (20 GB usable /data) |
+| Display | 1280x800, 160 DPI, MIPI DSI (landscape, 270° rotated) |
+| LCD Driver | `za691_101_qinuo_jhx_9881c` (ILI9881C-based) |
+| Touch | Silead GSL680 (I2C bus 0, addr 0x40) |
+| WiFi | XR829 (Allwinner/XRadio) |
+| Bluetooth | XRadio (xradio_btlpm module) |
+| Android | 10 (API 29), `userdebug` build with `test-keys` |
+| Manufacturer | Allwinner (OEM: YHK) |
+| Build Type | `userdebug` — **root access available via `adb root`** |
 
 ---
 
-## System Image Analysis
+## What We Did
 
-### What It Is
+### 1. Custom Kiosk Browser App
 
-The system image is **not** a traditional Android system image (no `boot.img`, `system.img`, etc.). It is a **Termux userland filesystem snapshot** — a tarball of the `/data/data/com.termux/files/` directory containing **465,519 files** (~2.5 GB compressed).
+Built a minimal Android WebView-based kiosk browser (`com.linknlink.kiosk`, 2.9 MB):
 
-### Top-Level Structure
+- **Home launcher** — replaces LinknLink launcher, auto-starts on boot
+- **Fullscreen immersive** — no status bar, no navigation, no distractions
+- **Error handling** — shows connection error screen with auto-retry (5s)
+- **SSL tolerance** — accepts self-signed certs for local services
+- **URL persistence** — remembers URL across reboots
+- **Settings access** — tap top-right corner 5 times to change URL
+- **ADB URL change** — `am start -n com.linknlink.kiosk/.KioskActivity --es url "http://..."`
+- **Wake lock** — screen never sleeps
+- **Viewport** — renders at native 1280x800 (no mobile viewport scaling)
 
+### 2. WebView Upgrade (Chromium 74 → 146)
+
+The stock firmware ships with **Chromium 74** (from 2019) as the only WebView provider. This doesn't support modern CSS features like `gap` for flexbox (added in Chromium 84).
+
+**Problem**: The framework's `config_webview_packages` only lists `com.android.webview`, and it's OEM-signed (signature `1a492f7d`), so you can't update it with Google's version.
+
+**Solution**: Created a **Runtime Resource Overlay (RRO)** that overrides the framework's allowed WebView provider list:
+
+1. Built an overlay APK targeting `android` that overrides `res/xml/config_webview_packages.xml`
+2. Added `com.google.android.webview.dev`, `com.google.android.webview`, and `com.android.chrome` as valid providers
+3. Pushed to `/product/overlay/WebViewConfigOverlay.apk`
+4. Installed **Android System WebView Dev** via AuroraStore (F-Droid build)
+5. System automatically switched to the newer provider
+
+**Result**: WebView went from Chromium 74 (2019) to **Chromium 146** (2025). Full modern CSS/JS support.
+
+**Search paths for WebView providers** (from `libbootanimation.so`):
 ```
-files/
-├── apps/          # Termux app internals
-├── home/          # Home directory (servicemanager scripts, configs)
-└── usr/           # Termux prefix (binaries, libs, services, proot Ubuntu)
+1. /apex/com.android.bootanimation/etc/bootanimation.zip
+2. com.google.android.webview.dev  (our addition)
+3. com.android.webview             (stock, Chromium 74)
+4. com.android.chrome              (our addition)
+5. com.google.android.webview      (our addition)
 ```
 
-### Architecture Stack
+### 3. Custom Boot Animation
 
+Replaced the LinknLink boot animation with a heat-pump themed one matching the dashboard:
+
+- **Dark navy background** (#0d1117) matching the dashboard
+- **Cyan snowflake** with glow effect — fades in during part0
+- **"IVT Air X 400 / Heat Pump Dashboard"** text
+- **Cyan-to-orange gradient flow line** — represents cold→hot energy flow
+- **Animated particles** moving along the flow line in the looping part1
+- **"Starting..."** text with animated dots
+- **1.9 MB** (down from 12 MB original)
+- **12 FPS**, 1280x800, 36 frames per part
+
+**Boot animation search paths** (extracted from `libbootanimation.so`):
 ```
-Android OS (stock, aarch64)
-  └── Termux (terminal emulator app)
-       ├── runit (service supervisor)
-       ├── proot-distro Ubuntu (full rootfs — 397K of 465K files, ~85% of image)
-       │    └── Home Assistant (Python virtualenv)
-       ├── Mosquitto (MQTT broker)
-       ├── MariaDB (database)
-       ├── Zigbee2MQTT / Z-Wave JS UI
-       ├── Node-RED
-       ├── Matter server + bridge
-       ├── ~15 proprietary LinknLink Go binaries
-       └── Full C/C++ toolchain (Clang 20, CMake, etc.)
-  └── LinknLink Homescreen APK (launcher app)
+1. /apex/com.android.bootanimation/etc/bootanimation.zip
+2. /data/local/bootanimation.zip        ← we use this (always writable)
+3. /product/media/bootanimation.zip     ← and this (backup, persists)
+4. /oem/media/bootanimation.zip
+5. /system/media/bootanimation.zip      ← stock (read-only, dm-verity)
 ```
 
-All cloud connectivity goes through `euhome.linklinkiot.com`.
+**Note**: `/system` is dm-verity protected and can't be written persistently. We use `/data/local/` (highest priority writable path) and `/product/media/` (writable after `mount -o remount,rw /product`).
+
+### 4. System Cleanup & Optimization
+
+**Android bloatware**: 55 packages disabled via `pm disable` (root) or `pm disable-user`:
+
+| Category | Packages | Examples |
+|----------|----------|----------|
+| Vendor | 2 | OTA updater, YHK management |
+| LinknLink/Termux | 2 | LinknLink launcher, Termux |
+| Telephony/SMS | 3 | MMS, SIM dialog, SMS push |
+| Unused providers | 5 | Calendar, contacts, blocked numbers |
+| Security/enterprise | 4 | Secure element, cert installer, provisioning |
+| Network extras | 3 | VPN, hotspot 2.0, PAC proxy |
+| Google apps | ~20 | Docs UI, CTS shims, etc. |
+| Misc | ~16 | Settings intelligence, Bluetooth MIDI, etc. |
+
+**Critical packages NOT disabled** (will break boot):
+- `com.android.phone` — system_server depends on telephony
+- `com.google.android.ext.services` — core Android services
+- `com.android.systemui` — display management
+- `com.android.settings` — system settings
+- `com.android.providers.media` — media scanner
+- `com.android.providers.settings` — settings provider
+- `com.android.packageinstaller` — APK installation
+- `com.android.keychain` — SSL/TLS certificates
+- `com.android.inputmethod.latin` — keyboard
+
+**Performance tweaks** (via `settings put`):
+- All animations disabled (window, transition, animator = 0)
+- Screen always on, max brightness, no lockscreen
+- Background process limit = 2
+- GPU rendering forced
+- Notifications disabled
+- Auto-updates disabled
+- Power saving disabled
+
+**Termux cleanup**: All 19 runit services stopped. Home Assistant, MariaDB, Zigbee2MQTT, Node-RED, Matter — all disabled. proot Ubuntu (85% of image) available for removal.
+
+### 5. Factory Reset Recovery
+
+Documented the full recovery procedure after an over-aggressive cleanup caused a boot loop:
+
+1. Factory reset via recovery mode
+2. WiFi reconnection via root shell (`wpa_supplicant.conf` edit)
+3. Re-enable wireless ADB
+4. Run `setup-kiosk-device.sh` for automated re-setup
+
+**WiFi config** (written to `/data/misc/wifi/wpa_supplicant/wpa_supplicant.conf`):
+```
+ctrl_interface=/data/vendor/wifi/wpa/sockets
+update_config=1
+pmf=1
+p2p_disabled=1
+
+network={
+    ssid="YourSSID"
+    psk="YourPassword"
+    key_mgmt=WPA-PSK
+    priority=1
+}
+```
 
 ---
 
-## Runit Services (19 active)
-
-| Service | Purpose |
-|---------|---------|
-| `hass` | Home Assistant (runs inside proot Ubuntu) |
-| `mosquitto` | MQTT broker |
-| `node-red` | Node-RED automation |
-| `zigbee2mqtt` | Zigbee gateway |
-| `zwave-js-ui` | Z-Wave gateway |
-| `matter-server` | Matter protocol server |
-| `matter-bridge` | Matter bridge |
-| `frpc` | FRP reverse proxy client (remote access) |
-| `isgaddonmanager` | LinknLink addon manager (HTTP :54328) |
-| `isgdevicemanager` | LinknLink device manager (HTTP :1688) |
-| `isgdatamanager` | Data recording service |
-| `isgspacemanager` | Spatial intelligence service |
-| `isgtrigger` | Trigger/automation service |
-| `isgdida` | Timer service |
-| `isgelecstat` | Energy management |
-| `isg-credential-services` | Authentication service |
-| `isg-adb-server` | ADB server |
-| `messageproxy` | Message proxy |
-| `ssh-agent` | SSH agent |
-
-Additional services managed by `termuxservice` (outside main runit):
-- `mysqld` (MariaDB)
-- `sshd` (SSH server, port 8022)
-- `isgservicemonitor` (service health monitoring)
-
----
-
-## Addon System
-
-The iSG has a plugin/addon architecture managed by `isgaddonmanager`. Addons are installed via shell scripts downloaded from the cloud. Known addons:
-
-| Addon | Built-in | Status | Port |
-|-------|----------|--------|------|
-| Home Assistant Server | Yes | Installed | :8123 |
-| MQTT Broker (Mosquitto) | Yes | Running | :1883 |
-| Zigbee2MQTT | Yes | Installed | :8080 |
-| ZWave-JS-UI | Yes | Installed | :8091 |
-| MariaDB | Yes | Running | :3306 |
-| System Monitor | Yes | Running | :54328/web |
-| Node-RED | No | Available | :1880 |
-| ESPHome | No | Available | :6052 |
-| CloudFlare Tunnel | No | Available | — |
-| HA Web SSH | No | Available | :4200 |
-| HACS | No | Installed | — |
-| Printer Server (CUPS) | No | Available | :631 |
-| SSH Password | Yes | Running | ssh :8022 |
-| Serial Port Viewer | No | Running | — |
-| Port Redirect | No | Available | — |
-| Timer | Yes | Running | — |
-| Trigger | Yes | Running | — |
-| Spatial Intelligence | Yes | Running | — |
-| Data Record | Yes | Running | — |
-| Energy Management | Yes | Running | — |
-| SmartBNB Service | No | Available | — |
-| Mushroom Box | No | Available | — |
-| Add-On Management | Yes | Running | — |
-| Ctwing Access | No | Available | — |
-
----
-
-## Software Inventory
-
-### Binaries (`/usr/bin/`) — 854 total
-
-Notable inclusions:
-- **Compilers**: Clang 20, GCC (aarch64-linux-android), CMake, Make, Autotools
-- **Languages**: Python 3.12, Node.js, npm
-- **Databases**: MariaDB (full server + client tools)
-- **Networking**: SSH (client + server), Mosquitto, frpc, ADB
-- **Dev tools**: Git, Bison, pkg-config, etc.
-
-### Python Packages — 548 total
-
-Mostly Home Assistant and its dependencies (aiohttp, aioesphomeapi, aiohomekit, etc.)
-
-### Node.js Modules — 81,308 files
-
-Includes Node-RED, Zigbee2MQTT, Z-Wave JS UI, Matterbridge.
-
-### proot Ubuntu — 397,082 files (85% of image)
-
-A full Ubuntu rootfs used exclusively to run Home Assistant in a Python virtualenv at `/root/homeassistant/bin/activate`.
-
----
-
-## Key Configuration
-
-### MQTT (`configuration.yaml`)
-
-```yaml
-mqtt:
-  host: 127.0.0.1
-  port: 1883
-  username: admin
-  password: admin
-```
-
-### Home Assistant Launch
-
-Home Assistant runs inside proot Ubuntu:
-```sh
-#!/data/data/com.termux/files/usr/bin/sh
-exec proot-distro login ubuntu << EOF
-source /root/homeassistant/bin/activate
-hass
-EOF
-```
-
-### Service Management
-
-Services are controlled via runit (`runsv`/`runsvdir`). The `isgservicemonitor` watches health, and `isgaddonmanager` handles install/upgrade/status via MQTT topics like `isg/run/{service}/status`.
-
----
-
-## Process Memory Usage (from snapshot)
-
-| Process | Memory |
-|---------|--------|
-| `hass` (instance 1) | 47 MB |
-| `hass` (instance 2) | 93 MB |
-| `com.termux` | 49 MB |
-| `isgaddonmanager` | 19 MB |
-| `isgservicemonitor` | 17 MB |
-| `isgspacemanager` | 14 MB |
-| `mysqld` | 12 MB |
-| `isgtrigger` | 8 MB |
-| `isgelecstat` | 8 MB |
-| `sshd` | 5 MB |
-| `isgdatamanager` | 5 MB |
-| `mosquitto` | 4 MB |
-| `isgdida` | 3 MB |
-| `adb` | 3 MB |
-
----
-
-## Goal: Minimal Kiosk Browser
-
-The current image is massively over-provisioned for a kiosk browser use case. ~95%+ of the content is unnecessary.
-
-### Option A: Stay on Android + Clean Up (Recommended — Simplest)
-
-Keep Android but strip it down for kiosk use. This is a two-phase process:
-
-**Phase 1: Android cleanup (from host via ADB)**
-```bash
-# Connect and clean up Android bloatware, optimize display settings
-bash scripts/cleanup-adb.sh 192.168.1.100
-
-# This will also save device_props.txt and installed_packages.txt
-# for hardware identification
-```
-
-**Phase 2: Termux cleanup (SSH into device)**
-```bash
-# SSH into the iSG
-ssh root@192.168.1.100 -p 8022
-
-# Basic cleanup: stop services, clear caches, remove dev tools
-bash cleanup-termux.sh
-
-# Full cleanup: also remove proot Ubuntu, node_modules, Python packages
-# Saves ~2+ GB and frees significant RAM
-bash cleanup-termux.sh --aggressive
-```
-
-**Phase 3: Set up kiosk browser**
-```bash
-bash scripts/setup-kiosk.sh 192.168.1.100 https://your-dashboard.com
-# Optionally provide a kiosk browser APK:
-bash scripts/setup-kiosk.sh 192.168.1.100 https://your-dashboard.com --browser fully-kiosk.apk
-```
-
-**What gets removed/disabled:**
-
-| Category | Items | Estimated Savings |
-|----------|-------|-------------------|
-| Termux services | 16 of 19 runit services stopped | ~200 MB RAM |
-| proot Ubuntu | Full rootfs + Home Assistant | ~1.5 GB disk |
-| Node.js modules | zigbee2mqtt, node-red, zwave, matter | ~500 MB disk |
-| Python packages | 548 HA-related packages | ~300 MB disk |
-| Dev toolchain | Clang 20, CMake, GCC, autotools | ~400 MB disk |
-| MariaDB | Database server + data | ~100 MB disk |
-| Caches | pip, npm, temp files, logs | ~100 MB disk |
-| Android bloatware | Google apps, OEM apps (disabled) | ~50 MB RAM |
-
-**What stays:**
-- Android OS + display/touch drivers
-- Termux (minimal, for SSH access)
-- SSHD (remote management)
-- Kiosk browser app
-
-- **Pro**: No bootloader/kernel risks, touchscreen/display guaranteed to work, reversible
-- **Con**: Still running Android overhead (~200 MB baseline)
-
-### Option B: Linux via Termux + proot (No Root Needed)
-
-- Keep Android as the base but strip the Termux image to essentials
-- Install a minimal Linux distro via proot-distro (e.g., Alpine)
-- Display still goes through an Android app (e.g., Termux:X11 or VNC)
-- **Pro**: Safe, reversible, proven to work on this hardware
-- **Con**: Still Android underneath, display rendering goes through Android
-
-### Option C: Native Linux (Most Aggressive)
-
-- Requires identifying the exact SoC (check via `getprop ro.board.platform` on the device)
-- Flash a mainline or vendor Linux kernel + minimal rootfs
-- Example stack: Alpine Linux + Cage (Wayland compositor) + Chromium `--kiosk`
-- **Pro**: Minimal, no Android bloat, full OS control
-- **Con**: Risk of bricking, touchscreen/display driver support uncertain, likely no community support for this hardware
-
----
-
-## Cleanup Results (2026-02-08)
+## Memory & Performance
 
 ### Before Cleanup
 
 | Metric | Value |
 |--------|-------|
 | Memory used | 1,393 MB / 3,923 MB (35.5%) |
-| CPU | 13.1% |
-| Disk | 7,006 MB / 20,092 MB (34.9%) |
 | Processes | 39 |
-| Top consumer | hass: 334 MB, mysqld: 125 MB |
+| Top consumers | hass: 334 MB, mysqld: 125 MB, com.termux: 49 MB |
 
-### After Cleanup
+### After Full Cleanup
 
 | Metric | Value |
 |--------|-------|
-| Memory used | **923 MB / 3,923 MB (23.5%)** |
-| CPU | **12.0%** |
-| Disk | 6,852 MB / 20,092 MB (34.1%) |
-| Processes | **30** |
-| Top consumer | com.termux: 139 MB |
+| Memory used | ~900 MB / 3,923 MB (~23%) |
+| Processes | ~15 |
+| Top consumer | com.linknlink.kiosk (WebView) |
 
-### What Was Done
+**~500 MB RAM freed** — the device now runs the kiosk browser smoothly with 3 GB free.
 
-**Android side (via ADB):**
-- Disabled 42 bloatware packages (Google apps, Allwinner test apps, Opera, APKPure, OTA updaters)
-- Removed wireless ADB app (no longer needed — ADB persisted natively)
-- Disabled all animations
-- Set screen always-on, disabled lockscreen
-- Limited background processes to 2
-- Cleared app caches
+---
 
-**Termux side (via ADB run-as):**
-- Stopped 7 services: hass, mysqld, isgdatamanager, isgdida, isgelecstat, isgspacemanager, isgtrigger
-- Killed proot (Ubuntu container for HA)
-- Enabled SSHD
+## Architecture
 
-**Memory freed: ~470 MB (34% reduction)**
+```
+Android 10 (stock, userdebug)
+  ├── WebView: Chromium 146 (via overlay + WebView Dev)
+  ├── Kiosk Browser (com.linknlink.kiosk) — home launcher
+  │     └── WebView → http://192.168.86.10/kiosk.html
+  ├── Boot Animation: custom heat-pump themed
+  ├── 55 bloatware packages disabled
+  ├── Termux: disabled (available if needed)
+  └── ADB: wireless on :5555 (persistent)
+```
 
-### Still Running
+---
 
-| Service | Memory | Purpose | Can Remove? |
-|---------|--------|---------|-------------|
-| com.termux | 139 MB | Termux base | No (needed for services) |
-| isgaddonmanager | 25 MB | Addon manager | Maybe (manages service updates) |
-| mosquitto | 7 MB | MQTT broker | Yes if not using MQTT |
-| sshd | 4 MB | SSH remote access | No (needed for management) |
-| runsv/svlogd (x23) | ~64 MB | Service supervisors | Partially (could remove stopped service dirs) |
+## Partition Layout
+
+```
+mmcblk0     30 GB   Full eMMC
+├── p1      64 MB   bootloader
+├── p2      16 MB   env (U-Boot environment)
+├── p3      32 MB   boot (kernel + ramdisk)
+├── p4       5 GB   super (system, vendor, product — dm-verity protected)
+├── p5      16 MB   misc
+├── p6      32 MB   recovery
+├── p7     768 MB   cache
+├── p8–p10  48 MB   vbmeta (verified boot)
+├── p11     16 MB   metadata
+├── p15      2 MB   dtbo
+├── p16     16 MB   media_data
+└── p17     23 GB   UDISK (data partition, ext4 — user data, apps)
+```
+
+---
+
+## Key Findings
+
+### dm-verity & System Partition
+- `/system` is dm-verity protected — writes don't persist across reboot
+- `/product` IS writable after `mount -o remount,rw /product` (overlays persist here)
+- `/data` is always writable (boot animation, app data, etc.)
+- `adb disable-verity` reports "Device is locked" but enables overlayfs for `/vendor`
+
+### Bootloader
+- Locked with AVB 2.0 (`ro.boot.flash.locked=1`)
+- Build type is `userdebug` with `test-keys` — root via `adb root` works
+- `fastboot flashing unlock` may work but will factory reset
+
+### WebView Provider System
+- Framework resource `res/xml/config_webview_packages.xml` controls allowed providers
+- Stock firmware only allows `com.android.webview` (OEM-signed, Chromium 74)
+- Runtime Resource Overlays (RROs) in `/product/overlay/` can override framework resources
+- `cmd webviewupdate set-webview-implementation PACKAGE` switches active provider
+- System auto-selects the highest-version valid provider after overlay is applied
+
+### Boot Animation Format
+- Standard Android `bootanimation.zip` (ZIP_STORED, not compressed)
+- `desc.txt` format: `WIDTH HEIGHT FPS\np COUNT PAUSE PART_DIR\n...`
+- `p 1 0 part0` = play once, no pause
+- `p 0 0 part1` = loop until boot complete
+- Frames: numbered JPG/PNG files in part directories
+
+---
+
+## Source Files (not in repo)
+
+| File | Size | Description |
+|------|------|-------------|
+| `image_*.tar.gz` | ~2.5 GB | iSG Termux userland snapshot |
+| `20167_global_1224.apk` | ~243 MB | iSG homescreen/launcher app |
+| `AuroraStore-*.apk` | ~8.4 MB | AuroraStore (for installing WebView) |
+
+---
+
+## Original System Image Analysis
+
+The system image is a **Termux userland filesystem snapshot** (not a full Android image) containing 465,519 files:
+
+| Layer | Files | Size | Purpose |
+|-------|-------|------|---------|
+| proot Ubuntu | 397K (85%) | ~1.5 GB | Runs Home Assistant in a Python venv |
+| Node.js modules | 81K | ~500 MB | Node-RED, Zigbee2MQTT, Z-Wave JS, Matter |
+| Termux binaries | 854 | ~400 MB | Clang 20, CMake, Python 3.12, MariaDB |
+| LinknLink Go services | 15 | ~50 MB | isgaddonmanager, isgdevicemanager, etc. |
+
+### 19 Runit Services (all disabled for kiosk)
+
+| Service | Purpose |
+|---------|---------|
+| `hass` | Home Assistant (in proot Ubuntu) |
+| `mosquitto` | MQTT broker |
+| `node-red` | Node-RED automation |
+| `zigbee2mqtt` | Zigbee gateway |
+| `zwave-js-ui` | Z-Wave gateway |
+| `matter-server/bridge` | Matter protocol |
+| `frpc` | FRP reverse proxy |
+| `mysqld` | MariaDB |
+| `sshd` | SSH server (:8022) |
+| `isg*` (7 services) | LinknLink proprietary services |
 
 ---
 
 ## TODO
 
-- [x] ~~Get ADB/SSH access to a live iSG device~~
-- [x] ~~Identify the SoC/chipset~~ → Allwinner Ceres (sun50iw10p1)
-- [x] ~~Determine display resolution~~ → 1280x800 @ 160 DPI
-- [x] ~~Run initial cleanup~~ → 470 MB RAM freed
-- [ ] Test kiosk browser (Fully Kiosk Browser is already installed: `de.ozerov.fully`)
-- [ ] Run aggressive Termux cleanup (remove proot Ubuntu, node_modules, dev tools — saves ~2 GB disk)
-- [ ] Evaluate if `isgaddonmanager` can be stopped safely
-- [ ] Remove runsv/svlogd instances for permanently disabled services
-- [ ] Research Allwinner Ceres mainline Linux support for Option C
-- [ ] Investigate bootloader unlock possibility
+- [x] Get ADB/SSH access to live device
+- [x] Identify SoC/chipset → Allwinner A133
+- [x] Determine display resolution → 1280x800 @ 160 DPI
+- [x] Run cleanup → 500 MB RAM freed, 55 packages disabled
+- [x] Build custom kiosk browser APK
+- [x] Upgrade WebView (Chromium 74 → 146 via framework overlay)
+- [x] Custom boot animation (heat pump themed)
+- [x] Automated setup script
+- [x] Research native Linux feasibility (see NATIVE_LINUX.md)
+- [ ] Add hard-reload command to kiosk app (clear WebView cache + reload)
+- [ ] Investigate bootloader unlock (`fastboot flashing unlock`)
+- [ ] Try Allwinner FEL mode for potential firmware backup
+- [ ] Evaluate Creality Sonic Pad community work (same A133 SoC)
