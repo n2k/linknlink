@@ -6,7 +6,6 @@ Converting a LinknLink iSG (Android wall-mounted smart screen) from a bloated sm
 
 ```
 README.md                           — This file (findings + setup guide)
-NATIVE_LINUX.md                     — Research into native Linux on the hardware
 
 kiosk-browser/                      — Custom Android WebView kiosk browser app
   app/src/main/
@@ -269,10 +268,70 @@ mmcblk0     30 GB   Full eMMC
 - `/data` is always writable (boot animation, app data, etc.)
 - `adb disable-verity` reports "Device is locked" but enables overlayfs for `/vendor`
 
-### Bootloader
-- Locked with AVB 2.0 (`ro.boot.flash.locked=1`)
-- Build type is `userdebug` with `test-keys` — root via `adb root` works
-- `fastboot flashing unlock` may work but will factory reset
+### Bootloader Unlock & TWRP
+
+The bootloader is locked but **supports unlocking**:
+
+| Property | Value |
+|----------|-------|
+| `ro.boot.flash.locked` | `1` (locked) |
+| `sys.oem_unlock_allowed` | `1` (unlock allowed!) |
+| `ro.oem_unlock_supported` | `1` (supported!) |
+| `ro.build.type` | `userdebug` |
+| `ro.build.tags` | `test-keys` |
+| `ro.debuggable` | `1` |
+| U-Boot | `2018.05 (12/13/2024-09:17:40)` |
+| AVB | `2.0` |
+
+**Unlock procedure** (requires physical USB connection):
+
+```bash
+# 1. Enable OEM unlock (already done via ADB)
+adb shell settings put global oem_unlock_enabled 1
+
+# 2. Reboot to bootloader
+adb reboot bootloader
+
+# 3. Unlock (WARNING: factory resets the device!)
+fastboot flashing unlock
+
+# 4. Flash vbmeta with verification disabled
+fastboot flash vbmeta vbmeta.img --disable-verification
+
+# 5. Reboot
+fastboot reboot
+```
+
+**Note**: Allwinner devices may not support standard `fastboot` mode. They use FEL mode (USB recovery protocol) instead. If `adb reboot bootloader` doesn't enter fastboot, try:
+- Hold a button combination during boot (varies by device)
+- Use [sunxi-fel](https://linux-sunxi.org/FEL) tools
+- Use Allwinner PhoenixSuit/LiveSuit via USB-OTG
+
+**Partition backups** are stored in `partitions/` (not committed — 163 MB total):
+
+| Partition | Size | File | Purpose |
+|-----------|------|------|---------|
+| bootloader | 64 MB | `bootloader.img` | U-Boot (FAT16 container) |
+| boot | 32 MB | `boot.img` | Kernel + ramdisk (Android boot image v2) |
+| recovery | 32 MB | `recovery.img` | Recovery kernel + ramdisk |
+| vbmeta | 16 MB | `vbmeta.img` | Verified boot metadata (AVB 2.0) |
+| dtbo | 2 MB | `dtbo.img` | Device tree overlays |
+| env | 16 MB | `env.img` | U-Boot environment variables |
+
+**Boot image details** (for TWRP build):
+
+| Field | Value |
+|-------|-------|
+| Header version | 2 |
+| Page size | 2048 |
+| Kernel load addr | `0x40080000` |
+| Ramdisk load addr | `0x43000000` |
+| Tags addr | `0x40000100` |
+| Kernel size | 21.2 MB |
+| A/B partitions | No (dedicated recovery) |
+| Dynamic partitions | Yes (super) |
+
+**TWRP status**: No official TWRP build exists for this device. A custom build would need the vendor kernel (4.9.170) and a device tree. The backed-up `boot.img` kernel can be reused.
 
 ### WebView Provider System
 - Framework resource `res/xml/config_webview_packages.xml` controls allowed providers
@@ -338,8 +397,8 @@ The system image is a **Termux userland filesystem snapshot** (not a full Androi
 - [x] Upgrade WebView (Chromium 74 → 146 via framework overlay)
 - [x] Custom boot animation (heat pump themed)
 - [x] Automated setup script
-- [x] Research native Linux feasibility (see NATIVE_LINUX.md)
+- [ ] Unlock bootloader (OEM unlock enabled, needs physical USB to test)
+- [ ] Build and flash TWRP recovery (no official build — needs custom device tree)
 - [ ] Add hard-reload command to kiosk app (clear WebView cache + reload)
-- [ ] Investigate bootloader unlock (`fastboot flashing unlock`)
-- [ ] Try Allwinner FEL mode for potential firmware backup
-- [ ] Evaluate Creality Sonic Pad community work (same A133 SoC)
+- [ ] Remove AuroraStore from device (no longer needed)
+- [ ] Aggressive Termux disk cleanup (remove proot Ubuntu, ~1.5 GB)

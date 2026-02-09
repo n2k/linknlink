@@ -33,3 +33,6 @@ Thumbs.db
 
 # Large source files (not committed)
 *.tar.gz
+
+# Partition backups (not committed — 163 MB)
+partitions/
